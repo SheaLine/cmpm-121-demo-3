@@ -57,8 +57,8 @@ leaflet
   .addTo(map);
 
 function resolveAssetPath(relativePath: string): string {
-  //console.log(import.meta.url);
-  return `./${relativePath}`;
+  console.log(relativePath);
+  return import.meta.resolve(`../public/${relativePath}`);
 }
 
 const playerIcon = leaflet.icon({
@@ -183,12 +183,17 @@ function depositCoin(coin: Coin, cache: Cache) {
   cache.coins.push(coin);
   updateInventoryDisplay();
   dispatchEvent(new CustomEvent("cache-updated", { detail: cache }));
+
+  if (cache.coins.length >= 1) {
+    const cacheMarker = cache.marker;
+    cacheMarker.setIcon(cacheIcon);
+  }
 }
 
 function updateInventoryDisplay() {
   const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
-  statusPanel.innerHTML = `inventory: 
-  ${playerInventory.map((coin) => coin.id).join(", ")}`;
+  statusPanel.innerHTML = `inventory:<br> 
+  ${playerInventory.map((coin) => `&nbsp;&nbsp;🪙 ${coin.id}`).join(",<br>")}`;
   dispatchEvent(new CustomEvent("player-inventory-changed"));
 }
 

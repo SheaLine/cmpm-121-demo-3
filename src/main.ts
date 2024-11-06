@@ -57,7 +57,7 @@ leaflet
   .addTo(map);
 
 function resolveAssetPath(relativePath: string): string {
-  // console.log(import.meta.url);
+  //console.log(import.meta.url);
   return `./${relativePath}`;
 }
 

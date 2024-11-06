@@ -57,7 +57,7 @@ leaflet
   .addTo(map);
 
 function resolveAssetPath(relativePath: string): string {
-  return import.meta.resolve(`${relativePath}`);
+  return import.meta.resolve(`../public/${relativePath}`);
 }
 
 const playerIcon = leaflet.icon({

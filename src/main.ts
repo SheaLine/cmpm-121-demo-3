@@ -56,23 +56,18 @@ leaflet
   })
   .addTo(map);
 
-function resolveAssetPath(relativePath: string): string {
-  console.log(relativePath);
-  return import.meta.resolve(`../public/${relativePath}`);
-}
-
 const playerIcon = leaflet.icon({
   iconUrl: "you-are-here.png",
   iconSize: [48, 48],
 });
 
 const cacheIcon = leaflet.icon({
-  iconUrl: resolveAssetPath("box.png"),
+  iconUrl: "box.png",
   iconSize: [32, 32],
 });
 
 const cacheOpenIcon = leaflet.icon({
-  iconUrl: resolveAssetPath("open-box.png"),
+  iconUrl: "open-box.png",
   iconSize: [32, 32],
 });
 

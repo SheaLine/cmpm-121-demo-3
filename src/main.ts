@@ -62,7 +62,7 @@ function resolveAssetPath(relativePath: string): string {
 }
 
 const playerIcon = leaflet.icon({
-  iconUrl: resolveAssetPath("you-are-here.png"),
+  iconUrl: "you-are-here.png",
   iconSize: [48, 48],
 });
 

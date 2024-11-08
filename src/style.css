@@ -48,6 +48,10 @@ h1 {
   height: 80vh;
 }
 
+.coin-div {
+  padding: 3px;
+}
+
 li {
   padding-bottom: 10px;
 }

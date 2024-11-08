@@ -10,6 +10,7 @@ import "./leafletWorkaround.ts";
 
 // Deterministic random number generator
 import luck from "./luck.ts";
+import { Board, Cell } from "./board.ts";
 
 // Location of our classroom (as identified on Google Maps)
 const OAKES_CLASSROOM = leaflet.latLng(36.98949379578401, -122.06277128548504);
@@ -40,11 +41,7 @@ interface Cache {
   marker: leaflet.Marker;
 }
 
-interface Cell {
-  i: number;
-  j: number;
-}
-
+const board = new Board(TILE_DEGREES, NEIGHBORHOOD_SIZE);
 const playerInventory: Coin[] = [];
 
 // Populate the map with a background tile layer
@@ -81,14 +78,8 @@ const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "inventory:";
 
 function spawnCache(cell: Cell) {
-  const origin = OAKES_CLASSROOM;
-  const bounds = leaflet.latLngBounds([
-    [origin.lat + cell.i * TILE_DEGREES, origin.lng + cell.j * TILE_DEGREES],
-    [
-      origin.lat + (cell.i + 1) * TILE_DEGREES,
-      origin.lng + (cell.j + 1) * TILE_DEGREES,
-    ],
-  ]);
+  const bounds = board.getCellBounds(cell);
+  console.log(`Spawning cache at ${bounds.getCenter()}`);
 
   const rect = leaflet.marker(bounds.getCenter(), { icon: cacheIcon });
   rect.addTo(map);
@@ -99,8 +90,7 @@ function spawnCache(cell: Cell) {
     marker: rect,
   };
 
-  const numberOfCoins = Math.floor(luck([cell.i, cell.j].toString()) * 100);
-
+  const numberOfCoins = Math.floor(luck([cell.i, cell.j].toString()) * 10);
   for (let k = 0; k < numberOfCoins; k++) {
     const coinId = `${cell.i}:${cell.j}#${k}`;
     cache.coins.push({ id: coinId });
@@ -111,22 +101,15 @@ function spawnCache(cell: Cell) {
 
 function createCachePopupContent(cache: Cache) {
   const popupDiv = document.createElement("div");
-  popupDiv.innerHTML = `
-    <div>There is a cache here at 
-      ${cache.location.lat.toFixed(5)}, 
-      ${cache.location.lng.toFixed(5)}
-    </div>
-  `;
-
   cache.coins.forEach((coin) => {
     const fixedCoinId = coin.id.replace(/[^a-zA-Z0-9-_]/g, "_");
 
     const coinDiv = document.createElement("div");
+    coinDiv.classList.add("coin-div");
     coinDiv.innerHTML = `
       <span>Coin ID: ${coin.id}</span>
       <button id="collect-${fixedCoinId}">Collect</button>
-    `;
-
+      `;
     popupDiv.appendChild(coinDiv);
 
     coinDiv
@@ -140,8 +123,8 @@ function createCachePopupContent(cache: Cache) {
 
   const depositDiv = document.createElement("div");
   depositDiv.innerHTML = `
-  <div>Deposit a coin from your inventory </div>
-  <button id = "deposit"> Deposit </button>
+  <div><br>Deposit a coin from your inventory:</div>
+  <button id="deposit"> Deposit </button>
   `;
 
   depositDiv
@@ -165,11 +148,11 @@ function collectCoin(coin: Coin, cache: Cache) {
   cache.coins = cache.coins.filter((c) => c.id !== coin.id);
   playerInventory.push(coin);
   updateInventoryDisplay();
-  dispatchEvent(new CustomEvent("cache-updated", { detail: cache }));
+  // dispatchEvent(new CustomEvent("cache-updated", { detail: cache }));
 
   if (cache.coins.length === 0) {
-    const cacheMarker = cache.marker;
-    cacheMarker.setIcon(cacheOpenIcon);
+    // const cacheMarker = cache.marker;
+    cache.marker.setIcon(cacheOpenIcon);
   }
 }
 
@@ -177,7 +160,7 @@ function depositCoin(coin: Coin, cache: Cache) {
   console.log(`Depositing coin ${coin.id}`);
   cache.coins.push(coin);
   updateInventoryDisplay();
-  dispatchEvent(new CustomEvent("cache-updated", { detail: cache }));
+  // dispatchEvent(new CustomEvent("cache-updated", { detail: cache }));
 
   if (cache.coins.length >= 1) {
     const cacheMarker = cache.marker;
@@ -189,14 +172,15 @@ function updateInventoryDisplay() {
   const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
   statusPanel.innerHTML = `inventory:<br> 
   ${playerInventory.map((coin) => `&nbsp;&nbsp;🪙 ${coin.id}`).join(",<br>")}`;
-  dispatchEvent(new CustomEvent("player-inventory-changed"));
+  // dispatchEvent(new CustomEvent("player-inventory-changed"));
 }
 
 // Look around the player's neighborhood for caches to spawn
 for (let i = -NEIGHBORHOOD_SIZE; i < NEIGHBORHOOD_SIZE; i++) {
   for (let j = -NEIGHBORHOOD_SIZE; j < NEIGHBORHOOD_SIZE; j++) {
     if (luck([i, j].toString()) < CACHE_SPAWN_PROBABILITY) {
-      spawnCache({ i, j });
+      const cell = board.getCellForPoint(OAKES_CLASSROOM);
+      spawnCache({ i: cell.i + i, j: cell.j + j });
     }
   }
 }

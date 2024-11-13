@@ -48,6 +48,12 @@ h1 {
   height: 80vh;
 }
 
+.cache-title {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
 .coin-div {
   padding: 3px;
 }

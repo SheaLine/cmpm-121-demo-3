@@ -36,13 +36,17 @@ interface Coin {
 }
 
 interface Cache {
-  location: leaflet.LatLng;
+  cell: Cell;
   coins: Coin[];
   marker: leaflet.Marker;
+  toMomento(): string;
+  fromMomento(momento: string): void;
+  refreshMemento(): void;
 }
 
 const board = new Board(TILE_DEGREES, NEIGHBORHOOD_SIZE);
 const playerInventory: Coin[] = [];
+const visibleCaches: string[] = [];
 
 // Populate the map with a background tile layer
 leaflet
@@ -77,7 +81,7 @@ playerMarker.addTo(map);
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "inventory:";
 
-function spawnCache(cell: Cell) {
+function spawnCache(cell: Cell): Cache {
   const bounds = board.getCellBounds(cell);
   console.log(`Spawning cache at ${bounds.getCenter()}`);
 
@@ -85,22 +89,55 @@ function spawnCache(cell: Cell) {
   rect.addTo(map);
 
   const cache: Cache = {
-    location: bounds.getCenter(),
+    cell: cell,
     coins: [],
     marker: rect,
+    toMomento() {
+      return JSON.stringify({
+        coins: this.coins,
+        cell: this.cell,
+      });
+    },
+    fromMomento(momento: string) {
+      const data = JSON.parse(momento);
+      this.coins = data.coins;
+      this.cell = data.cell;
+    },
+    refreshMemento() {
+      for (let i = 0; i < visibleCaches.length; i++) {
+        const currCache: Cache = JSON.parse(visibleCaches[i]) as Cache;
+        if (
+          this.cell.i == currCache.cell.i &&
+          this.cell.j == currCache.cell.j
+        ) {
+          visibleCaches[i] = this.toMomento();
+        }
+      }
+    },
   };
-
-  const numberOfCoins = Math.floor(luck([cell.i, cell.j].toString()) * 10);
-  for (let k = 0; k < numberOfCoins; k++) {
-    const coinId = `${cell.i}:${cell.j}#${k}`;
-    cache.coins.push({ id: coinId });
+  // Check if there is a saved state for this cache
+  const savedMomento = localStorage.getItem(`cache_${cell.i}_${cell.j}`);
+  if (savedMomento) {
+    cache.fromMomento(savedMomento);
+  } else {
+    const numberOfCoins = Math.floor(luck([cell.i, cell.j].toString()) * 100);
+    for (let k = 0; k < numberOfCoins; k++) {
+      const coinId = `${cell.i}:${cell.j}#${k}`;
+      cache.coins.push({ id: coinId });
+    }
+    // Save the initial state of the cache
+    localStorage.setItem(`cache_${cell.i}_${cell.j}`, cache.toMomento());
   }
 
   rect.bindPopup(() => createCachePopupContent(cache));
+  return cache;
 }
 
 function createCachePopupContent(cache: Cache) {
   const popupDiv = document.createElement("div");
+  popupDiv.innerHTML = `
+    <div class="cache-title">Cache at ${cache.cell.i}, ${cache.cell.j}</div>
+  `;
   cache.coins.forEach((coin) => {
     const fixedCoinId = coin.id.replace(/[^a-zA-Z0-9-_]/g, "_");
 
@@ -125,6 +162,7 @@ function createCachePopupContent(cache: Cache) {
   depositDiv.innerHTML = `
   <div><br>Deposit a coin from your inventory:</div>
   <button id="deposit"> Deposit </button>
+  <button id="collect-all"> Collect All </button>
   `;
 
   depositDiv
@@ -139,6 +177,13 @@ function createCachePopupContent(cache: Cache) {
         console.log("No coins in inventory to deposit");
       }
     });
+  depositDiv
+    .querySelector<HTMLButtonElement>("#collect-all")!
+    .addEventListener("click", () => {
+      collectAll(cache);
+      const newPopupContent = createCachePopupContent(cache);
+      popupDiv.innerHTML = newPopupContent.innerHTML;
+    });
   popupDiv.append(depositDiv);
   return popupDiv;
 }
@@ -148,20 +193,26 @@ function collectCoin(coin: Coin, cache: Cache) {
   cache.coins = cache.coins.filter((c) => c.id !== coin.id);
   playerInventory.push(coin);
   updateInventoryDisplay();
-  // dispatchEvent(new CustomEvent("cache-updated", { detail: cache }));
-
+  cache.refreshMemento();
   if (cache.coins.length === 0) {
-    // const cacheMarker = cache.marker;
     cache.marker.setIcon(cacheOpenIcon);
   }
+}
+
+function collectAll(cache: Cache) {
+  console.log(`Collecting all coins in cache ${cache.cell.i}: ${cache.cell.j}`);
+  playerInventory.push(...cache.coins);
+  cache.coins = [];
+  updateInventoryDisplay();
+  cache.refreshMemento();
+  cache.marker.setIcon(cacheOpenIcon);
 }
 
 function depositCoin(coin: Coin, cache: Cache) {
   console.log(`Depositing coin ${coin.id}`);
   cache.coins.push(coin);
   updateInventoryDisplay();
-  // dispatchEvent(new CustomEvent("cache-updated", { detail: cache }));
-
+  cache.refreshMemento();
   if (cache.coins.length >= 1) {
     const cacheMarker = cache.marker;
     cacheMarker.setIcon(cacheIcon);
@@ -172,15 +223,66 @@ function updateInventoryDisplay() {
   const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
   statusPanel.innerHTML = `inventory:<br> 
   ${playerInventory.map((coin) => `&nbsp;&nbsp;🪙 ${coin.id}`).join(",<br>")}`;
-  // dispatchEvent(new CustomEvent("player-inventory-changed"));
 }
 
-// Look around the player's neighborhood for caches to spawn
-for (let i = -NEIGHBORHOOD_SIZE; i < NEIGHBORHOOD_SIZE; i++) {
-  for (let j = -NEIGHBORHOOD_SIZE; j < NEIGHBORHOOD_SIZE; j++) {
-    if (luck([i, j].toString()) < CACHE_SPAWN_PROBABILITY) {
-      const cell = board.getCellForPoint(OAKES_CLASSROOM);
-      spawnCache({ i: cell.i + i, j: cell.j + j });
-    }
-  }
+// Add event listeners for movement buttons
+document
+  .getElementById("north")!
+  .addEventListener("click", () => movePlayer(TILE_DEGREES, 0));
+document
+  .getElementById("south")!
+  .addEventListener("click", () => movePlayer(-TILE_DEGREES, 0));
+document
+  .getElementById("west")!
+  .addEventListener("click", () => movePlayer(0, -TILE_DEGREES));
+document
+  .getElementById("east")!
+  .addEventListener("click", () => movePlayer(0, TILE_DEGREES));
+
+function movePlayer(dLat: number, dLng: number) {
+  const currentLatLng = playerMarker.getLatLng();
+  const newLatLng = leaflet.latLng(
+    currentLatLng.lat + dLat,
+    currentLatLng.lng + dLng,
+  );
+  playerMarker.setLatLng(newLatLng);
+  map.panTo(newLatLng);
+  updateVisibleCaches(newLatLng);
 }
+
+// inspired by peer https://github.com/sym-z/cmpm-121-demo-3/blob/main/src/main.ts#L179
+function updateVisibleCaches(playerPosition: leaflet.LatLng) {
+  // Remove all existing caches from the map
+  map.eachLayer((layer) => {
+    if (layer instanceof leaflet.Marker && layer !== playerMarker) {
+      map.removeLayer(layer);
+    }
+  });
+
+  // Get new set of cells near the player's position
+  const nearbyCells = board.getCellsNearPoint(playerPosition);
+
+  // Spawn caches in the new set of cells
+  nearbyCells.forEach((cell) => {
+    let duplicate = false;
+    if (luck([cell.i, cell.j].toString()) < CACHE_SPAWN_PROBABILITY) {
+      const currentCache: Cache = spawnCache(cell);
+      for (const cache of visibleCaches) {
+        currentCache.fromMomento(cache);
+
+        if (currentCache.cell.i === cell.i && currentCache.cell.j === cell.j) {
+          duplicate = true;
+          visibleCaches.push(cache);
+          break;
+        }
+      }
+      if (!duplicate) {
+        console.log("Adding new cache to visibleCaches");
+        const newCache = spawnCache(cell);
+        visibleCaches.push(newCache.toMomento());
+      }
+    }
+  });
+}
+
+updateVisibleCaches(OAKES_CLASSROOM);

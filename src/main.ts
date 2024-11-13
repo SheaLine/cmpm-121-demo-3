@@ -67,11 +67,6 @@ const cacheIcon = leaflet.icon({
   iconSize: [32, 32],
 });
 
-const cacheOpenIcon = leaflet.icon({
-  iconUrl: "open-box.png",
-  iconSize: [32, 32],
-});
-
 // Add a marker to represent the player
 const playerMarker = leaflet.marker(OAKES_CLASSROOM, { icon: playerIcon });
 playerMarker.bindTooltip("That's you!");
@@ -101,10 +96,6 @@ function spawnCache(cell: Cell): Cache {
       const data = JSON.parse(momento);
       this.coins = data.coins;
       this.cell = data.cell;
-
-      if (this.coins.length === 0) {
-        this.marker.setIcon(cacheOpenIcon);
-      }
     },
     refreshMemento() {
       for (let i = 0; i < visibleCaches.length; i++) {
@@ -197,9 +188,6 @@ function collectCoin(coin: Coin, cache: Cache) {
   playerInventory.push(coin);
   updateInventoryDisplay();
   cache.refreshMemento();
-  if (cache.coins.length === 0) {
-    cache.marker.setIcon(cacheOpenIcon);
-  }
 }
 
 function collectAll(cache: Cache) {
@@ -208,7 +196,6 @@ function collectAll(cache: Cache) {
   cache.coins = [];
   updateInventoryDisplay();
   cache.refreshMemento();
-  cache.marker.setIcon(cacheOpenIcon);
 }
 
 function depositCoin(coin: Coin, cache: Cache) {

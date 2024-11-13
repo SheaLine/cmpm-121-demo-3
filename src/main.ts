@@ -87,7 +87,6 @@ function spawnCache(cell: Cell): Cache {
 
   const rect = leaflet.marker(bounds.getCenter(), { icon: cacheIcon });
   rect.addTo(map);
-
   const cache: Cache = {
     cell: cell,
     coins: [],
@@ -102,6 +101,10 @@ function spawnCache(cell: Cell): Cache {
       const data = JSON.parse(momento);
       this.coins = data.coins;
       this.cell = data.cell;
+
+      if (this.coins.length === 0) {
+        this.marker.setIcon(cacheOpenIcon);
+      }
     },
     refreshMemento() {
       for (let i = 0; i < visibleCaches.length; i++) {

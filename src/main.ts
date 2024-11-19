@@ -39,8 +39,8 @@ interface Cache {
   cell: Cell;
   coins: Coin[];
   marker: leaflet.Marker;
-  toMomento(): string;
-  fromMomento(momento: string): void;
+  toMemento(): string;
+  fromMemento(memento: string): void;
   refreshMemento(): void;
 }
 
@@ -86,14 +86,14 @@ function spawnCache(cell: Cell): Cache {
     cell: cell,
     coins: [],
     marker: rect,
-    toMomento() {
+    toMemento() {
       return JSON.stringify({
         coins: this.coins,
         cell: this.cell,
       });
     },
-    fromMomento(momento: string) {
-      const data = JSON.parse(momento);
+    fromMemento(memento: string) {
+      const data = JSON.parse(memento);
       this.coins = data.coins;
       this.cell = data.cell;
     },
@@ -104,15 +104,15 @@ function spawnCache(cell: Cell): Cache {
           this.cell.i == currCache.cell.i &&
           this.cell.j == currCache.cell.j
         ) {
-          visibleCaches[i] = this.toMomento();
+          visibleCaches[i] = this.toMemento();
         }
       }
     },
   };
   // Check if there is a saved state for this cache
-  const savedMomento = localStorage.getItem(`cache_${cell.i}_${cell.j}`);
-  if (savedMomento) {
-    cache.fromMomento(savedMomento);
+  const savedMemento = localStorage.getItem(`cache_${cell.i}_${cell.j}`);
+  if (savedMemento) {
+    cache.fromMemento(savedMemento);
   } else {
     const numberOfCoins = Math.floor(luck([cell.i, cell.j].toString()) * 100);
     for (let k = 0; k < numberOfCoins; k++) {
@@ -120,7 +120,7 @@ function spawnCache(cell: Cell): Cache {
       cache.coins.push({ id: coinId });
     }
     // Save the initial state of the cache
-    localStorage.setItem(`cache_${cell.i}_${cell.j}`, cache.toMomento());
+    localStorage.setItem(`cache_${cell.i}_${cell.j}`, cache.toMemento());
   }
 
   rect.bindPopup(() => createCachePopupContent(cache));
@@ -215,6 +215,15 @@ function updateInventoryDisplay() {
   ${playerInventory.map((coin) => `&nbsp;&nbsp;🪙 ${coin.id}`).join(",<br>")}`;
 }
 
+const movementHistory: leaflet.LatLng[] = []; // Store positions for polyline
+const movementPolyline = leaflet
+  .polyline(movementHistory, {
+    color: "red",
+    weight: 6,
+    opacity: 1,
+  })
+  .addTo(map);
+
 // Add event listeners for movement buttons
 document
   .getElementById("north")!
@@ -237,18 +246,25 @@ function movePlayer(dLat: number, dLng: number) {
   );
   playerMarker.setLatLng(newLatLng);
   map.panTo(newLatLng);
+
+  movementHistory.push(newLatLng);
+  movementPolyline.setLatLngs(movementHistory);
+
+  clearCaches();
   updateVisibleCaches(newLatLng);
+  savePlayerState();
 }
 
-// inspired by peer https://github.com/sym-z/cmpm-121-demo-3/blob/main/src/main.ts#L179
-function updateVisibleCaches(playerPosition: leaflet.LatLng) {
-  // Remove all existing caches from the map
+function clearCaches() {
   map.eachLayer((layer) => {
     if (layer instanceof leaflet.Marker && layer !== playerMarker) {
       map.removeLayer(layer);
     }
   });
-
+}
+// inspired by peer https://github.com/sym-z/cmpm-121-demo-3/blob/main/src/main.ts#L179
+function updateVisibleCaches(playerPosition: leaflet.LatLng) {
+  clearCaches();
   // Get new set of cells near the player's position
   const nearbyCells = board.getCellsNearPoint(playerPosition);
 
@@ -258,7 +274,7 @@ function updateVisibleCaches(playerPosition: leaflet.LatLng) {
     if (luck([cell.i, cell.j].toString()) < CACHE_SPAWN_PROBABILITY) {
       const currentCache: Cache = spawnCache(cell);
       for (const cache of visibleCaches) {
-        currentCache.fromMomento(cache);
+        currentCache.fromMemento(cache);
 
         if (currentCache.cell.i === cell.i && currentCache.cell.j === cell.j) {
           duplicate = true;
@@ -269,10 +285,125 @@ function updateVisibleCaches(playerPosition: leaflet.LatLng) {
       if (!duplicate) {
         console.log("Adding new cache to visibleCaches");
         const newCache = spawnCache(cell);
-        visibleCaches.push(newCache.toMomento());
+        visibleCaches.push(newCache.toMemento());
       }
     }
   });
 }
 
-updateVisibleCaches(OAKES_CLASSROOM);
+let geolocationWatchId: number | null = null;
+
+document.getElementById("sensor")!.addEventListener("click", () => {
+  if (geolocationWatchId === null) {
+    // Start watching the geolocation
+    geolocationWatchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        movePlayer(
+          latitude - playerMarker.getLatLng().lat,
+          longitude - playerMarker.getLatLng().lng,
+        );
+      },
+      (error) => {
+        console.error("Geolocation error:", error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 5000,
+      },
+    );
+    console.log("Geolocation tracking enabled");
+  } else {
+    // Stop watching the geolocation
+    navigator.geolocation.clearWatch(geolocationWatchId);
+    geolocationWatchId = null;
+    console.log("Geolocation tracking disabled");
+  }
+});
+
+document.getElementById("reset")!.addEventListener("click", () => {
+  const confirmation = prompt(
+    "Are you sure you want to erase your game state? Type 'yes' to confirm.",
+  );
+  if (confirmation?.toLowerCase() === "yes") {
+    resetGameState();
+  }
+});
+
+function savePlayerState() {
+  const playerLatLng = playerMarker.getLatLng();
+  const playerState = {
+    playerLat: playerLatLng.lat,
+    playerLng: playerLatLng.lng,
+    playerCoins: playerInventory,
+    cacheMementos: visibleCaches,
+    movementHistory: movementHistory.map((latLng) => [latLng.lat, latLng.lng]), // Save latLng points
+  };
+  localStorage.setItem("playerState", JSON.stringify(playerState));
+}
+
+function loadPlayerState() {
+  const savedState = localStorage.getItem("playerState");
+  if (savedState) {
+    const playerState = JSON.parse(savedState);
+
+    // Restore player position
+    const playerLatLng = leaflet.latLng(
+      playerState.playerLat,
+      playerState.playerLng,
+    );
+    playerMarker.setLatLng(playerLatLng);
+    map.panTo(playerLatLng);
+
+    // Restore player inventory
+    playerInventory.length = 0; // Clear current inventory
+    playerInventory.push(...playerState.playerCoins);
+    updateInventoryDisplay();
+
+    // Restore visible caches
+    visibleCaches.length = 0; // Clear current visible caches
+    visibleCaches.push(...playerState.cacheMementos);
+    visibleCaches.forEach((cacheMemento) => {
+      const cacheData = JSON.parse(cacheMemento);
+      const cell = cacheData.cell;
+      const cache = spawnCache(cell);
+      cache.fromMemento(cacheMemento);
+    });
+
+    // Restore movement history
+    movementHistory.length = 0; // Clear current movement history
+    movementHistory.push(
+      ...playerState.movementHistory.map((latLng: [number, number]) =>
+        leaflet.latLng(latLng[0], latLng[1])
+      ),
+    );
+    movementPolyline.setLatLngs(movementHistory);
+  }
+}
+
+function resetGameState() {
+  // Clear player inventory
+  playerInventory.length = 0;
+  updateInventoryDisplay();
+
+  // Clear visible caches
+  clearCaches();
+
+  // Clear movement history
+  movementHistory.length = 0;
+  movementPolyline.setLatLngs([]);
+
+  // Clear localStorage
+  localStorage.removeItem("playerState");
+
+  // Optionally, reset player position to the initial position
+  const initialPosition = OAKES_CLASSROOM;
+  playerMarker.setLatLng(initialPosition);
+  map.panTo(initialPosition);
+
+  console.log("Game state has been reset.");
+}
+
+// updateVisibleCaches(OAKES_CLASSROOM);
+loadPlayerState();

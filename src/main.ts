@@ -41,12 +41,11 @@ interface Cache {
   marker: leaflet.Marker;
   toMemento(): string;
   fromMemento(memento: string): void;
-  refreshMemento(): void;
 }
 
 const board = new Board(TILE_DEGREES, NEIGHBORHOOD_SIZE);
 const playerInventory: Coin[] = [];
-const visibleCaches: string[] = [];
+// const visibleCaches: string[] = [];
 
 // Populate the map with a background tile layer
 leaflet
@@ -76,56 +75,112 @@ playerMarker.addTo(map);
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "inventory:";
 
-function spawnCache(cell: Cell): Cache {
-  const bounds = board.getCellBounds(cell);
-  console.log(`Spawning cache at ${bounds.getCenter()}`);
+class CacheManager {
+  private visibleCaches: Cache[] = [];
 
-  const rect = leaflet.marker(bounds.getCenter(), { icon: cacheIcon });
-  rect.addTo(map);
-  const cache: Cache = {
-    cell: cell,
-    coins: [],
-    marker: rect,
-    toMemento() {
-      return JSON.stringify({
-        coins: this.coins,
-        cell: this.cell,
-      });
-    },
-    fromMemento(memento: string) {
-      const data = JSON.parse(memento);
-      this.coins = data.coins;
-      this.cell = data.cell;
-    },
-    refreshMemento() {
-      for (let i = 0; i < visibleCaches.length; i++) {
-        const currCache: Cache = JSON.parse(visibleCaches[i]) as Cache;
-        if (
-          this.cell.i == currCache.cell.i &&
-          this.cell.j == currCache.cell.j
-        ) {
-          visibleCaches[i] = this.toMemento();
-        }
-      }
-    },
-  };
-  // Check if there is a saved state for this cache
-  const savedMemento = localStorage.getItem(`cache_${cell.i}_${cell.j}`);
-  if (savedMemento) {
-    cache.fromMemento(savedMemento);
-  } else {
-    const numberOfCoins = Math.floor(luck([cell.i, cell.j].toString()) * 100);
-    for (let k = 0; k < numberOfCoins; k++) {
-      const coinId = `${cell.i}:${cell.j}#${k}`;
-      cache.coins.push({ id: coinId });
+  constructor(private board: Board, private map: leaflet.Map) {}
+
+  createCache(cell: Cell): Cache {
+    const marker = this.createCacheMarker(cell);
+    const coins = this.initializeCacheCoins(cell);
+    const cache: Cache = {
+      cell,
+      coins,
+      marker,
+      toMemento() {
+        return JSON.stringify({
+          coins: this.coins,
+          cell: this.cell,
+        });
+      },
+      fromMemento(memento: string) {
+        const data = JSON.parse(memento);
+        this.coins = data.coins;
+        this.cell = data.cell;
+      },
+    };
+
+    // Save the initial state if not already saved
+    if (!localStorage.getItem(`cache_${cell.i}_${cell.j}`)) {
+      this.saveCacheState(cache);
+    } else {
+      cache.fromMemento(localStorage.getItem(`cache_${cell.i}_${cell.j}`)!);
     }
-    // Save the initial state of the cache
-    localStorage.setItem(`cache_${cell.i}_${cell.j}`, cache.toMemento());
+
+    this.setupCacheUI(cache);
+    return cache;
   }
 
-  rect.bindPopup(() => createCachePopupContent(cache));
-  return cache;
+  updateVisibleCaches(playerPosition: leaflet.LatLng): void {
+    this.clearCaches();
+    // Get new set of cells near the player's position
+    const nearbyCells = this.board.getCellsNearPoint(playerPosition);
+
+    // Spawn caches in the new set of cells
+    nearbyCells.forEach((cell) => {
+      let duplicate = false;
+      if (luck([cell.i, cell.j].toString()) < CACHE_SPAWN_PROBABILITY) {
+        for (const cache of this.visibleCaches) {
+          if (cache.cell.i === cell.i && cache.cell.j === cell.j) {
+            duplicate = true;
+            break;
+          }
+        }
+        if (!duplicate) {
+          console.log("Adding new cache to visibleCaches");
+          const newCache = this.createCache(cell);
+          this.visibleCaches.push(newCache);
+        }
+      }
+    });
+  }
+
+  private createCacheMarker(cell: Cell): leaflet.Marker {
+    const bounds = this.board.getCellBounds(cell);
+    console.log(`Creating marker at ${bounds.getCenter()}`);
+    const marker = leaflet.marker(bounds.getCenter(), { icon: cacheIcon });
+    marker.addTo(map);
+    return marker;
+  }
+
+  private initializeCacheCoins(cell: Cell): Coin[] {
+    const savedMemento = localStorage.getItem(`cache_${cell.i}_${cell.j}`);
+    if (savedMemento) {
+      const data = JSON.parse(savedMemento);
+      return data.coins;
+    } else {
+      const numberOfCoins = Math.floor(luck([cell.i, cell.j].toString()) * 100);
+      const coins: Coin[] = [];
+      for (let k = 0; k < numberOfCoins; k++) {
+        const coinId = `${cell.i}:${cell.j}#${k}`;
+        coins.push({ id: coinId });
+      }
+      return coins;
+    }
+  }
+
+  private setupCacheUI(cache: Cache): void {
+    cache.marker.bindPopup(() => createCachePopupContent(cache));
+  }
+
+  clearCaches(): void {
+    this.visibleCaches.forEach((cache) => this.map.removeLayer(cache.marker));
+    this.visibleCaches = [];
+  }
+
+  getVisibleCaches(): Cache[] {
+    return this.visibleCaches;
+  }
+
+  saveCacheState(cache: Cache): void {
+    localStorage.setItem(
+      `cache_${cache.cell.i}_${cache.cell.j}`,
+      cache.toMemento(),
+    );
+  }
 }
+
+const cacheManager = new CacheManager(board, map);
 
 function createCachePopupContent(cache: Cache) {
   const popupDiv = document.createElement("div");
@@ -187,7 +242,7 @@ function collectCoin(coin: Coin, cache: Cache) {
   cache.coins = cache.coins.filter((c) => c.id !== coin.id);
   playerInventory.push(coin);
   updateInventoryDisplay();
-  cache.refreshMemento();
+  cacheManager.saveCacheState(cache);
 }
 
 function collectAll(cache: Cache) {
@@ -195,18 +250,14 @@ function collectAll(cache: Cache) {
   playerInventory.push(...cache.coins);
   cache.coins = [];
   updateInventoryDisplay();
-  cache.refreshMemento();
+  cacheManager.saveCacheState(cache);
 }
 
 function depositCoin(coin: Coin, cache: Cache) {
   console.log(`Depositing coin ${coin.id}`);
   cache.coins.push(coin);
   updateInventoryDisplay();
-  cache.refreshMemento();
-  if (cache.coins.length >= 1) {
-    const cacheMarker = cache.marker;
-    cacheMarker.setIcon(cacheIcon);
-  }
+  cacheManager.saveCacheState(cache);
 }
 
 function updateInventoryDisplay() {
@@ -251,7 +302,7 @@ function movePlayer(dLat: number, dLng: number) {
   movementPolyline.setLatLngs(movementHistory);
 
   clearCaches();
-  updateVisibleCaches(newLatLng);
+  cacheManager.updateVisibleCaches(newLatLng);
   savePlayerState();
 }
 
@@ -259,34 +310,6 @@ function clearCaches() {
   map.eachLayer((layer) => {
     if (layer instanceof leaflet.Marker && layer !== playerMarker) {
       map.removeLayer(layer);
-    }
-  });
-}
-// inspired by peer https://github.com/sym-z/cmpm-121-demo-3/blob/main/src/main.ts#L179
-function updateVisibleCaches(playerPosition: leaflet.LatLng) {
-  clearCaches();
-  // Get new set of cells near the player's position
-  const nearbyCells = board.getCellsNearPoint(playerPosition);
-
-  // Spawn caches in the new set of cells
-  nearbyCells.forEach((cell) => {
-    let duplicate = false;
-    if (luck([cell.i, cell.j].toString()) < CACHE_SPAWN_PROBABILITY) {
-      const currentCache: Cache = spawnCache(cell);
-      for (const cache of visibleCaches) {
-        currentCache.fromMemento(cache);
-
-        if (currentCache.cell.i === cell.i && currentCache.cell.j === cell.j) {
-          duplicate = true;
-          visibleCaches.push(cache);
-          break;
-        }
-      }
-      if (!duplicate) {
-        console.log("Adding new cache to visibleCaches");
-        const newCache = spawnCache(cell);
-        visibleCaches.push(newCache.toMemento());
-      }
     }
   });
 }
@@ -337,7 +360,7 @@ function savePlayerState() {
     playerLat: playerLatLng.lat,
     playerLng: playerLatLng.lng,
     playerCoins: playerInventory,
-    cacheMementos: visibleCaches,
+    cacheMementos: cacheManager.getVisibleCaches(),
     movementHistory: movementHistory.map((latLng) => [latLng.lat, latLng.lng]), // Save latLng points
   };
   localStorage.setItem("playerState", JSON.stringify(playerState));
@@ -362,12 +385,11 @@ function loadPlayerState() {
     updateInventoryDisplay();
 
     // Restore visible caches
-    visibleCaches.length = 0; // Clear current visible caches
-    visibleCaches.push(...playerState.cacheMementos);
-    visibleCaches.forEach((cacheMemento) => {
+    cacheManager.clearCaches();
+    playerState.cacheMementos.forEach((cacheMemento: string) => {
       const cacheData = JSON.parse(cacheMemento);
       const cell = cacheData.cell;
-      const cache = spawnCache(cell);
+      const cache = cacheManager.createCache(cell);
       cache.fromMemento(cacheMemento);
     });
 

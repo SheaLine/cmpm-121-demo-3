@@ -168,8 +168,8 @@ class CacheManager {
     this.visibleCaches = [];
   }
 
-  getVisibleCaches(): Cache[] {
-    return this.visibleCaches;
+  getVisibleCacheMementos(): string[] {
+    return this.visibleCaches.map((cache) => cache.toMemento());
   }
 
   saveCacheState(cache: Cache): void {
@@ -360,7 +360,7 @@ function savePlayerState() {
     playerLat: playerLatLng.lat,
     playerLng: playerLatLng.lng,
     playerCoins: playerInventory,
-    cacheMementos: cacheManager.getVisibleCaches(),
+    cacheMementos: cacheManager.getVisibleCacheMementos(),
     movementHistory: movementHistory.map((latLng) => [latLng.lat, latLng.lng]), // Save latLng points
   };
   localStorage.setItem("playerState", JSON.stringify(playerState));
